@@ -10,7 +10,6 @@ from pathlib import Path
 
 from storage import CONFIG_DIR, PASSWORD_FILE, REPO_NAME, RESTIC, mount_for_device, run
 
-
 LOCK_FILE = CONFIG_DIR / "operation.lock"
 LOG_FILE = CONFIG_DIR / "restore-history.log"
 

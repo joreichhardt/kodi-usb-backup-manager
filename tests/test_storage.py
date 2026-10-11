@@ -1,11 +1,6 @@
-import sys
 import unittest
-from pathlib import Path
 
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "resources" / "lib"))
-
-from storage import UsbDisk, decode_mount, human_size  # noqa: E402
+from resources.lib.storage import UsbDisk, decode_mount, human_size
 
 
 class StorageTests(unittest.TestCase):

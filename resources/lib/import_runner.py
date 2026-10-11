@@ -9,16 +9,15 @@ from pathlib import Path
 
 from storage import CONFIG_DIR
 
-
 LOCK_FILE = CONFIG_DIR / "operation.lock"
 LOG_FILE = CONFIG_DIR / "import-history.log"
 
 EXTENSIONS = {
-    "Filme": {".avi", ".iso", ".m2ts", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".ts", ".wmv"},
-    "Serien": {".avi", ".iso", ".m2ts", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".ts", ".wmv"},
-    "Musik": {".aac", ".alac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav", ".wma"},
-    "Bilder": {".bmp", ".dng", ".gif", ".heic", ".heif", ".jpeg", ".jpg", ".mov", ".png", ".tif", ".tiff", ".webp"},
-    "ROMs": {".7z", ".a26", ".a78", ".atr", ".bin", ".gb", ".gba", ".gbc", ".gen", ".md", ".nes", ".sfc", ".smc", ".xex", ".zip"},
+    "movies": {".avi", ".iso", ".m2ts", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".ts", ".wmv"},
+    "tvshows": {".avi", ".iso", ".m2ts", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".ts", ".wmv"},
+    "music": {".aac", ".alac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav", ".wma"},
+    "pictures": {".bmp", ".dng", ".gif", ".heic", ".heif", ".jpeg", ".jpg", ".mov", ".png", ".tif", ".tiff", ".webp"},
+    "roms": {".7z", ".a26", ".a78", ".atr", ".bin", ".gb", ".gba", ".gbc", ".gen", ".md", ".nes", ".sfc", ".smc", ".xex", ".zip"},
 }
 
 
@@ -32,7 +31,7 @@ def log(message):
 
 def main(source, target, category):
     if category not in EXTENSIONS:
-        raise ValueError("Unbekannte Importkategorie")
+        raise ValueError("Unknown import category")
     source_path = Path(source).resolve()
     target_path = Path(target).resolve()
     if not source_path.is_dir() or not str(source_path).startswith("/var/media/"):
@@ -63,8 +62,8 @@ def main(source, target, category):
                 shutil.copy2(source_file, destination)
                 copied += 1
         log(f"Import abgeschlossen: kategorie={category} kopiert={copied} übersprungen={skipped}")
-        action = "UpdateLibrary(music)" if category == "Musik" else "UpdateLibrary(video)"
-        if category in {"Filme", "Serien", "Musik"} and shutil.which("kodi-send"):
+        action = "UpdateLibrary(music)" if category == "music" else "UpdateLibrary(video)"
+        if category in {"movies", "tvshows", "music"} and shutil.which("kodi-send"):
             subprocess.run(["kodi-send", f"--action={action}"], check=False)
     return 0
 

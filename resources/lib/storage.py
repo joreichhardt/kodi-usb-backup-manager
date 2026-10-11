@@ -1,10 +1,7 @@
-import os
 import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
-
 
 CONFIG_DIR = Path("/storage/.config/kodi-usb-backup")
 UUID_FILE = CONFIG_DIR / "uuid"
@@ -18,13 +15,12 @@ def run(args, check=True, timeout=30):
         args,
         check=check,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         timeout=timeout,
     )
 
 
-def udev_properties(name: str) -> Dict[str, str]:
+def udev_properties(name: str) -> dict[str, str]:
     result = run(
         ["udevadm", "info", "--query=property", f"--path=/sys/class/block/{name}"],
         check=False,
@@ -38,7 +34,10 @@ def udev_properties(name: str) -> Dict[str, str]:
 
 
 def human_size(byte_count: int) -> str:
-    value = float(byte_count)
+    try:
+        value = float(byte_count)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("byte_count must be numeric") from exc
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
         if value < 1024 or unit == "TiB":
             return f"{value:.1f} {unit}"
@@ -52,7 +51,7 @@ def decode_mount(value: str) -> str:
     )
 
 
-def mount_for_device(device: str) -> Optional[str]:
+def mount_for_device(device: str) -> str | None:
     try:
         with open("/proc/mounts", encoding="utf-8") as mounts:
             for line in mounts:
@@ -71,7 +70,7 @@ class Partition:
     uuid: str = ""
     label: str = ""
     fstype: str = ""
-    mountpoint: Optional[str] = None
+    mountpoint: str | None = None
 
 
 @dataclass
@@ -81,7 +80,7 @@ class UsbDisk:
     model: str
     serial: str
     size_bytes: int
-    partitions: List[Partition] = field(default_factory=list)
+    partitions: list[Partition] = field(default_factory=list)
 
     @property
     def title(self) -> str:
@@ -89,7 +88,7 @@ class UsbDisk:
         return f"{identity} · {human_size(self.size_bytes)} · {self.serial or 'ohne Seriennummer'}"
 
 
-def list_usb_disks() -> List[UsbDisk]:
+def list_usb_disks() -> list[UsbDisk]:
     disks = []
     sys_block = Path("/sys/class/block")
     if not sys_block.exists():
@@ -146,17 +145,17 @@ def registered_uuid() -> str:
         return ""
 
 
-def partition_by_uuid(disk: UsbDisk, uuid: str) -> Optional[Partition]:
+def partition_by_uuid(disk: UsbDisk, uuid: str) -> Partition | None:
     return next((part for part in disk.partitions if part.uuid == uuid), None)
 
 
-def repository_path(partition: Partition) -> Optional[Path]:
+def repository_path(partition: Partition) -> Path | None:
     if not partition.mountpoint:
         return None
     return Path(partition.mountpoint) / REPO_NAME / "repository"
 
 
-def has_repository(disk: UsbDisk) -> Optional[Partition]:
+def has_repository(disk: UsbDisk) -> Partition | None:
     for part in disk.partitions:
         repo = repository_path(part)
         if repo and (repo / "config").is_file():

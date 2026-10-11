@@ -5,11 +5,11 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
 from storage import CONFIG_DIR, PASSWORD_FILE, REPO_NAME, RESTIC, mount_for_device, run
-
 
 LOCK_FILE = CONFIG_DIR / "operation.lock"
 LOG_FILE = CONFIG_DIR / "backup-history.log"
@@ -31,8 +31,11 @@ def find_mount(uuid, timeout=60):
         device = result.stdout.strip()
         if device:
             mountpoint = mount_for_device(device)
-            if mountpoint and os.access(mountpoint, os.W_OK):
-                return Path(mountpoint)
+            try:
+                if mountpoint and os.access(mountpoint, os.W_OK):
+                    return Path(mountpoint)
+            except OSError:
+                pass
         time.sleep(1)
     raise RuntimeError("Backup-Platte ist nicht schreibbar eingehängt")
 
@@ -64,10 +67,8 @@ def restic(repo, *args, timeout=None):
 def write_recovery_kit(base):
     recovery_password = base / ".restic-password"
     shutil.copyfile(PASSWORD_FILE, recovery_password)
-    try:
+    with suppress(OSError):
         os.chmod(recovery_password, 0o600)
-    except OSError:
-        pass
     instructions = base / "WIEDERHERSTELLUNG.txt"
     instructions.write_text(
         "Kodi-Server-Backup\n"

@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-import os
+# ruff: noqa: I001
 import json
+import os
 import subprocess
-import sys
 import time
 from pathlib import Path
 
-import xbmc
-import xbmcgui
+import xbmc  # type: ignore[import-not-found]
+import xbmcgui  # type: ignore[import-not-found]
 
-ADDON_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(ADDON_DIR / "resources" / "lib"))
-
-from storage import (  # noqa: E402
+from resources.lib.storage import (
     CONFIG_DIR,
     PASSWORD_FILE,
     REPO_NAME,
@@ -26,16 +23,25 @@ from storage import (  # noqa: E402
     run,
     udev_properties,
 )
+from resources.lib.ui_strings import text  # type: ignore[import-not-found]
 
 
-HEADING = "USB Backup & Import"
+ADDON_DIR = Path(__file__).resolve().parent
 BACKUP_RUNNER = ADDON_DIR / "resources" / "lib" / "backup_runner.py"
 RESTORE_RUNNER = ADDON_DIR / "resources" / "lib" / "restore_runner.py"
 IMPORT_RUNNER = ADDON_DIR / "resources" / "lib" / "import_runner.py"
 
 
+def ui_text(key, **values):
+    try:
+        language = xbmc.getLanguage(xbmc.ISO_639_1)
+    except (AttributeError, TypeError):
+        language = xbmc.getLanguage()
+    return text(language, key, **values)
+
+
 def notify(message, icon=xbmcgui.NOTIFICATION_INFO, milliseconds=5000):
-    xbmcgui.Dialog().notification(HEADING, message, icon, milliseconds)
+    xbmcgui.Dialog().notification(ui_text("heading"), message, icon, milliseconds)
 
 
 def mounted_partition(disk: UsbDisk):
@@ -62,30 +68,31 @@ def validate_usb_disk(device):
 
 def format_as_backup(disk: UsbDisk):
     dialog = xbmcgui.Dialog()
-    message = (
-        f"{disk.title}\n\nAlle Daten auf {disk.device} werden unwiderruflich gelöscht. "
-        "Die interne NVMe und SATA-Laufwerke sind von der Auswahl ausgeschlossen."
-    )
-    if not dialog.yesno(HEADING, message, yeslabel="Weiter", nolabel="Abbrechen"):
+    if not dialog.yesno(
+        ui_text("heading"),
+        ui_text("format_warning", disk_title=disk.title, device=disk.device),
+        yeslabel=ui_text("continue"),
+        nolabel=ui_text("cancel"),
+    ):
         return
     if not dialog.yesno(
-        "Letzte Bestätigung",
-        f"{disk.device} jetzt vollständig löschen und als KODI_BACKUP formatieren?",
-        yeslabel="FORMATIEREN",
-        nolabel="Abbrechen",
+        ui_text("last_confirmation"),
+        ui_text("format_question", device=disk.device),
+        yeslabel=ui_text("format"),
+        nolabel=ui_text("cancel"),
     ):
         return
     if not validate_usb_disk(disk.device):
-        dialog.ok(HEADING, "Sicherheitsprüfung fehlgeschlagen: Das Gerät ist kein USB-Datenträger.")
+        dialog.ok(ui_text("heading"), ui_text("usb_check_failed"))
         return
 
     progress = xbmcgui.DialogProgress()
-    progress.create(HEADING, "USB-Platte wird vorbereitet …")
+    progress.create(ui_text("heading"), ui_text("preparing_disk"))
     try:
         for part in disk.partitions:
             run(["udevil", "--umount", part.device], check=False, timeout=20)
             run(["umount", part.device], check=False, timeout=20)
-        progress.update(20, "Partitionstabelle wird erstellt …")
+        progress.update(20, ui_text("creating_partition_table"))
         run(["parted", "-s", disk.device, "mklabel", "gpt"], timeout=30)
         run(
             ["parted", "-s", "-a", "optimal", disk.device, "mkpart", "primary", "ext4", "1MiB", "100%"],
@@ -98,30 +105,30 @@ def format_as_backup(disk: UsbDisk):
         while not os.path.exists(part_device) and time.monotonic() < deadline:
             time.sleep(1)
         if not os.path.exists(part_device):
-            raise RuntimeError("Die neue Partition ist nicht erschienen.")
-        progress.update(45, "ext4-Dateisystem wird erstellt …")
+            raise RuntimeError(ui_text("new_partition_missing"))
+        progress.update(45, ui_text("creating_filesystem"))
         run(["mkfs.ext4", "-F", "-L", "KODI_BACKUP", part_device], timeout=600)
         run(["udevadm", "settle", "--timeout=20"], check=False, timeout=25)
         run(["udevil", "--mount", part_device], check=False, timeout=30)
-        progress.update(70, "UUID und Sicherungsziel werden registriert …")
+        progress.update(70, ui_text("registering_backup"))
         current, partition = wait_for_partition(disk.name)
         if not current or not partition:
-            raise RuntimeError("Die neue Partition wurde nicht automatisch eingehängt.")
+            raise RuntimeError(ui_text("new_partition_not_mounted"))
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         UUID_FILE.write_text(partition.uuid + "\n", encoding="utf-8")
         os.chmod(UUID_FILE, 0o600)
         if not PASSWORD_FILE.exists():
             PASSWORD_FILE.write_text(os.urandom(32).hex() + "\n", encoding="utf-8")
             os.chmod(PASSWORD_FILE, 0o600)
-        progress.update(100, "Einrichtung abgeschlossen")
-    except Exception as exc:
+        progress.update(100, ui_text("setup_complete"))
+    except Exception as exc:  # noqa: BLE001 -- format failures must be reported in Kodi's UI
         xbmc.log(f"USB manager format failed: {exc}", xbmc.LOGERROR)
-        dialog.ok(HEADING, f"Einrichtung fehlgeschlagen:\n{exc}")
+        dialog.ok(ui_text("heading"), ui_text("setup_failed", error=exc))
         return
     finally:
         progress.close()
 
-    if dialog.yesno(HEADING, "Backup-Platte wurde eingerichtet. Erstes Vollbackup jetzt starten?"):
+    if dialog.yesno(ui_text("heading"), ui_text("start_first_backup")):
         start_background(BACKUP_RUNNER, partition.uuid)
 
 
@@ -129,71 +136,77 @@ def start_background(script, *args):
     log_dir = CONFIG_DIR / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"{Path(script).stem}.log"
-    stream = open(log_file, "a", encoding="utf-8")
     try:
-        subprocess.Popen(
-            ["/usr/bin/python3", str(script), *args],
-            stdin=subprocess.DEVNULL,
-            stdout=stream,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            close_fds=True,
-        )
-    finally:
-        stream.close()
+        with log_file.open("a", encoding="utf-8") as stream:
+            subprocess.Popen(
+                ["/usr/bin/python3", str(script), *args],
+                stdin=subprocess.DEVNULL,
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+            )
+    except OSError as exc:
+        xbmc.log(f"USB manager could not start job: {exc}", xbmc.LOGERROR)
+        notify(ui_text("job_start_failed"))
 
 
 def choose_import(disk: UsbDisk):
     part = mounted_partition(disk)
-    if not part:
-        xbmcgui.Dialog().ok(HEADING, "Das USB-Dateisystem ist nicht eingehängt.")
+    if not part or not part.mountpoint:
+        xbmcgui.Dialog().ok(ui_text("heading"), ui_text("filesystem_not_mounted"))
         return
-    categories = ["Filme", "Serien", "Musik", "Bilder", "ROMs"]
+    categories = ["movies", "tvshows", "music", "pictures", "roms"]
     targets = ["/storage/videos/Movies", "/storage/tvshows", "/storage/music", "/storage/pictures", "/storage/roms"]
-    choice = xbmcgui.Dialog().select("Import-Ziel wählen", categories)
+    labels = [ui_text(f"category_{category}") for category in categories]
+    choice = xbmcgui.Dialog().select(ui_text("select_import_target"), labels)
     if choice < 0:
         return
-    source = xbmcgui.Dialog().browse(0, "Quellordner auf USB wählen", "files", "", False, False, part.mountpoint)
+    source = xbmcgui.Dialog().browse(0, ui_text("select_usb_folder"), "files", "", False, False, part.mountpoint)
     if not source:
         return
     source_real = os.path.realpath(source)
     mount_real = os.path.realpath(part.mountpoint)
     if source_real != mount_real and not source_real.startswith(mount_real + os.sep):
-        xbmcgui.Dialog().ok(HEADING, "Der Quellordner liegt nicht auf der gewählten USB-Platte.")
+        xbmcgui.Dialog().ok(ui_text("heading"), ui_text("source_not_on_disk"))
         return
     target = targets[choice]
-    if xbmcgui.Dialog().yesno(HEADING, f"Medien aus\n{source}\n\nnach\n{target}\n\nimportieren?"):
+    if xbmcgui.Dialog().yesno(ui_text("heading"), ui_text("import_question", source=source, target=target)):
         start_background(IMPORT_RUNNER, source_real, target, categories[choice])
-        notify("Import wurde im Hintergrund gestartet.")
+        notify(ui_text("import_started"))
 
 
 def choose_snapshot(partition):
     base = Path(partition.mountpoint) / REPO_NAME
     repo = base / "repository"
-    password = PASSWORD_FILE if PASSWORD_FILE.exists() else base / ".restic-password"
-    if not repo.is_dir() or not password.is_file() or not RESTIC.is_file():
-        xbmcgui.Dialog().ok(HEADING, "Repository, Restic oder Wiederherstellungsschlüssel fehlt.")
+    recovery_key_file = PASSWORD_FILE if PASSWORD_FILE.exists() else base / ".restic-password"
+    if not repo.is_dir() or not recovery_key_file.is_file() or not RESTIC.is_file():
+        xbmcgui.Dialog().ok(ui_text("heading"), ui_text("repository_missing"))
         return None
     env = os.environ.copy()
     env["RESTIC_REPOSITORY"] = str(repo)
-    env["RESTIC_PASSWORD_FILE"] = str(password)
+    env["RESTIC_PASSWORD_FILE"] = str(recovery_key_file)
     result = subprocess.run(
         [str(RESTIC), "snapshots", "--json", "--host", "kodi"],
         env=env,
+        check=False,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         timeout=60,
     )
     if result.returncode:
-        xbmcgui.Dialog().ok(HEADING, f"Snapshots konnten nicht gelesen werden:\n{result.stderr[-500:]}")
+        xbmcgui.Dialog().ok(ui_text("heading"), ui_text("snapshots_failed", error=result.stderr[-500:]))
         return None
-    snapshots = sorted(json.loads(result.stdout), key=lambda item: item.get("time", ""), reverse=True)
+    try:
+        snapshots = sorted(json.loads(result.stdout), key=lambda item: item.get("time", ""), reverse=True)
+    except json.JSONDecodeError:
+        xbmcgui.Dialog().ok(ui_text("heading"), ui_text("snapshots_invalid"))
+        return None
     if not snapshots:
-        xbmcgui.Dialog().ok(HEADING, "Auf der Platte befinden sich keine Snapshots.")
+        xbmcgui.Dialog().ok(ui_text("heading"), ui_text("no_snapshots"))
         return None
     labels = [f"{item.get('time', '')[:19].replace('T', ' ')} · {item.get('short_id', item['id'][:8])}" for item in snapshots]
-    choice = xbmcgui.Dialog().select("Backup-Zeitpunkt auswählen", labels)
+    choice = xbmcgui.Dialog().select(ui_text("select_snapshot"), labels)
     return snapshots[choice]["id"] if choice >= 0 else None
 
 
@@ -201,23 +214,25 @@ def choose_restore(disk: UsbDisk, partition):
     snapshot = choose_snapshot(partition)
     if not snapshot:
         return
-    options = ["Kodi-Konfiguration", "Filme und Serien", "Musik", "Bilder", "ROMs", "Gesamtes /storage"]
     keys = ["kodi", "video", "music", "pictures", "roms", "all"]
-    choice = xbmcgui.Dialog().select("Wiederherstellung auswählen", options)
+    options = [ui_text(f"scope_{key}") for key in keys]
+    choice = xbmcgui.Dialog().select(ui_text("select_restore"), options)
     if choice < 0:
         return
     key = keys[choice]
-    warning = f"Aus dem neuesten Snapshot wiederherstellen: {options[choice]}?"
+    warning = ui_text("restore_question", scope=options[choice])
     if key == "all":
-        warning += "\n\nVorhandene Dateien können überschrieben werden; zusätzliche neuere Dateien bleiben erhalten."
-    if not xbmcgui.Dialog().yesno(HEADING, warning, yeslabel="Wiederherstellen", nolabel="Abbrechen"):
+        warning += ui_text("restore_all_warning")
+    if not xbmcgui.Dialog().yesno(
+        ui_text("heading"), warning, yeslabel=ui_text("restore"), nolabel=ui_text("cancel")
+    ):
         return
     if key == "all" and not xbmcgui.Dialog().yesno(
-        "Letzte Bestätigung", "Gesamte Wiederherstellung wirklich starten?", yeslabel="STARTEN", nolabel="Abbrechen"
+        ui_text("last_confirmation"), ui_text("start_full_restore"), yeslabel=ui_text("start"), nolabel=ui_text("cancel")
     ):
         return
     start_background(RESTORE_RUNNER, partition.uuid, key, snapshot)
-    notify("Wiederherstellung wurde im Hintergrund gestartet.")
+    notify(ui_text("restore_started"))
 
 
 def show_disk_menu(disk: UsbDisk):
@@ -228,26 +243,26 @@ def show_disk_menu(disk: UsbDisk):
     labels = []
     actions = []
     if registered_part:
-        labels.append("Backup jetzt starten")
+        labels.append(ui_text("start_backup"))
         actions.append(("backup", registered_part))
     if repository_part:
-        labels.append("Aus Backup wiederherstellen")
+        labels.append(ui_text("restore_backup"))
         actions.append(("restore", repository_part))
-    labels.append("Medien importieren")
+    labels.append(ui_text("import_media"))
     actions.append(("import", mounted_partition(disk)))
     if not registered_part:
-        labels.append("Als Backup-Platte einrichten (löscht Platte)")
+        labels.append(ui_text("setup_backup_disk"))
         actions.append(("format", None))
-    labels.append("Abbrechen")
+    labels.append(ui_text("cancel"))
     actions.append(("cancel", None))
 
-    choice = xbmcgui.Dialog().select(f"Externe Festplatte erkannt\n{disk.title}", labels)
+    choice = xbmcgui.Dialog().select(ui_text("disk_detected", disk_title=disk.title), labels)
     if choice < 0:
         return
     action, partition = actions[choice]
     if action == "backup":
         start_background(BACKUP_RUNNER, partition.uuid)
-        notify("Backup wurde im Hintergrund gestartet.")
+        notify(ui_text("backup_started"))
     elif action == "restore":
         choose_restore(disk, partition)
     elif action == "import":
@@ -272,7 +287,7 @@ class UsbMonitor(xbmc.Monitor):
                     refreshed = next((item for item in list_usb_disks() if item.name == name), disks[name])
                     show_disk_menu(refreshed)
                 known = set(disks)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- keep the long-running service alive after a device error
                 xbmc.log(f"USB manager service error: {exc}", xbmc.LOGERROR)
             if self.waitForAbort(2):
                 xbmc.log("USB Backup & Import service stopped", xbmc.LOGINFO)
