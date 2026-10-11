@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addon id="service.kodi.usbmanager"
+       name="USB Backup &amp; Import"
+       version="1.0.0"
+       provider-name="Local">
+  <requires>
+    <import addon="xbmc.python" version="3.0.0"/>
+  </requires>
+  <extension point="xbmc.service" library="service.py"/>
+  <extension point="xbmc.python.script" library="service.py"/>
+  <extension point="xbmc.addon.metadata">
+    <platform>linux</platform>
+    <summary lang="de_DE">USB-Platten für Backup, Wiederherstellung oder Medienimport verwenden</summary>
+    <description lang="de_DE">Erkennt externe USB-Laufwerke und führt sicher durch Backup, Wiederherstellung und Medienimport.</description>
+  </extension>
+</addon>
