@@ -258,6 +258,7 @@ def show_disk_menu(disk: UsbDisk):
 
 class UsbMonitor(xbmc.Monitor):
     def run(self):
+        xbmc.log("USB Backup & Import service started", xbmc.LOGINFO)
         known = set()
         first_scan = True
         while not self.abortRequested():
@@ -274,6 +275,7 @@ class UsbMonitor(xbmc.Monitor):
             except Exception as exc:
                 xbmc.log(f"USB manager service error: {exc}", xbmc.LOGERROR)
             if self.waitForAbort(2):
+                xbmc.log("USB Backup & Import service stopped", xbmc.LOGINFO)
                 return
 
 
