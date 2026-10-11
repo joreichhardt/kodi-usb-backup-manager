@@ -74,10 +74,6 @@ on the failed server.
 
 ## Development
 
-Maintainers and operators should also read [HANDOFF.md](HANDOFF.md), which
-documents the architecture, deployment state, acceptance test, known
-limitations, and release checklist.
-
 Syntax-check the Python files with:
 
 ```sh
